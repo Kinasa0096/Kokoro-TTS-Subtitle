@@ -1,12 +1,18 @@
-# Initalize a pipeline
 from kokoro import KPipeline
 import os
 from huggingface_hub import list_repo_files
 import uuid
-import re 
+import re
 import gradio as gr
-
 from deep_translator import GoogleTranslator
+import numpy as np
+import wave
+from pydub import AudioSegment, silence
+import string
+import json
+import shutil
+
+# === ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ===
 
 def bulk_translate(text, target_language, chunk_size=500):
     language_map_local = {
@@ -33,8 +39,7 @@ def bulk_translate(text, target_language, chunk_size=500):
     if current_chunk:
         chunks.append(current_chunk.strip())
     translated_chunks = [GoogleTranslator(target=lang_code).translate(chunk) for chunk in chunks]
-    result = " ".join(translated_chunks)
-    return result.strip()
+    return " ".join(translated_chunks).strip()
 
 language_map = {
     "American English": "a",
@@ -53,13 +58,13 @@ def update_pipeline(Language):
     new_lang = language_map.get(Language, "a")
     if new_lang != last_used_language:
         pipeline = KPipeline(lang_code=new_lang)
-        last_used_language = new_lang 
+        last_used_language = new_lang
         try:
             pipeline = KPipeline(lang_code=new_lang)
             last_used_language = new_lang
         except Exception as e:
-            gr.Warning(f"Make sure the input text is in {Language}",duration=10)
-            gr.Warning(f"Fallback to English Language",duration=5)
+            gr.Warning(f"Make sure the input text is in {Language}", duration=10)
+            gr.Warning(f"Fallback to English Language", duration=5)
             pipeline = KPipeline(lang_code="a")
             last_used_language = "a"
 
@@ -71,18 +76,11 @@ def create_audio_dir():
     audio_dir = os.path.join(root_dir, "kokoro_audio")
     if not os.path.exists(audio_dir):
         os.makedirs(audio_dir)
-        print(f"Created directory: {audio_dir}")
-    else:
-        print(f"Directory already exists: {audio_dir}")
     return audio_dir
 
 def clean_text(text):
     replacements = {
-        "–": " ",
-        "-": " ",
-        "**": " ",
-        "*": " ",
-        "#": " ",
+        "–": " ", "-": " ", "**": " ", "*": " ", "#": " ",
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -97,8 +95,7 @@ def clean_text(text):
         r'[\U0001FA00-\U0001FA6F]|'
         r'[\U0001FA70-\U0001FAFF]|'
         r'[\U00002702-\U000027B0]|'
-        r'[\U0001F1E0-\U0001F1FF]'
-        r'', flags=re.UNICODE)
+        r'[\U0001F1E0-\U0001F1FF]', flags=re.UNICODE)
     text = emoji_pattern.sub(r'', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -113,10 +110,6 @@ def tts_file_name(text, language):
     random_string = uuid.uuid4().hex[:8].upper()
     file_name = f"{temp_folder}/{truncated_text}_{random_string}.wav"
     return file_name
-
-import numpy as np
-import wave
-from pydub import AudioSegment, silence
 
 def strip_silence(audio: AudioSegment, silence_thresh=-45, chunk_size=10):
     not_silence = silence.detect_nonsilent(audio, min_silence_len=chunk_size, silence_thresh=silence_thresh)
@@ -133,7 +126,6 @@ def generate_and_save_audio(text, Language="American English", voice="af_bella",
     temp_audio_segments = []
     temp_word_timestamps = []
     global_offset = 0.0
-
     for i, result in enumerate(generator):
         audio_np = result.audio.numpy()
         audio_int16 = (audio_np * 32767).astype(np.int16)
@@ -160,7 +152,6 @@ def generate_and_save_audio(text, Language="American English", voice="af_bella",
             })
         global_offset += len(trimmed_audio) / 1000.0
         os.remove(temp_file)
-
     final_audio = temp_audio_segments[0]
     for seg in temp_audio_segments[1:]:
         final_audio += seg
@@ -170,8 +161,6 @@ def generate_and_save_audio(text, Language="American English", voice="af_bella",
 
 def adjust_timestamps(word_timestamps):
     return word_timestamps
-
-import string
 
 def write_word_srt(word_level_timestamps, output_file="word.srt", skip_punctuation=True):
     with open(output_file, "w", encoding="utf-8") as f:
@@ -255,9 +244,6 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
             text = split_line_by_char_limit(text, max_chars=30)
             f.write(f"{i}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{text}\n\n")
 
-import json
-import re
-
 def fix_punctuation(text):
     text = re.sub(r'\s([.,?!])', r'\1', text)
     text = text.replace('" ', '"')
@@ -335,14 +321,14 @@ def modify_filename(save_path: str, prefix: str = ""):
     name, ext = os.path.splitext(filename)
     new_filename = f"{prefix}{name}{ext}"
     return os.path.join(directory, new_filename)
-import shutil
+
 def save_current_data():
     if os.path.exists("./last"):
         shutil.rmtree("./last")
-    os.makedirs("./last",exist_ok=True)
+    os.makedirs("./last", exist_ok=True)
 
-def KOKORO_TTS_API(text, Language="American English",voice="af_bella", speed=1,translate_text=False,remove_silence=False,keep_silence_up_to=0.05):
-    if translate_text:    
+def KOKORO_TTS_API(text, Language="American English", voice="af_bella", speed=1, translate_text=False, remove_silence=False, keep_silence_up_to=0.05):
+    if translate_text:
         text = bulk_translate(text, Language, chunk_size=500)
     save_path, word_level_timestamps = generate_and_save_audio(
         text=text, Language=Language, voice=voice, speed=speed, remove_silence=remove_silence, keep_silence_up_to=keep_silence_up_to
@@ -360,7 +346,7 @@ def KOKORO_TTS_API(text, Language="American English",voice="af_bella", speed=1,t
         shutil.copy(normal_srt, "./last/")
         shutil.copy(json_file, "./last/")
         return save_path, save_path, word_level_srt, normal_srt, json_file
-    return save_path, save_path, None, None, None    
+    return save_path, save_path, None, None, None
 
 def ui():
     def toggle_autoplay(autoplay):
@@ -398,4 +384,47 @@ def ui():
                 with gr.Accordion('🎬 Autoplay, Subtitle, Timestamp', open=False):
                     autoplay = gr.Checkbox(value=True, label='▶️ Autoplay')
                     autoplay.change(toggle_autoplay, inputs=[autoplay], outputs=[audio])
-                    word_level
+                    word_level_srt_file = gr.File(label='📝 Download Word-Level SRT')
+                    srt_file = gr.File(label='📜 Download Sentence-Level SRT')
+                    sentence_duration_file = gr.File(label='⏳ Download Sentence Timestamp JSON')
+        text.submit(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed, translate_text, remove_silence], outputs=[audio, audio_file, word_level_srt_file, srt_file, sentence_duration_file])
+        generate_btn.click(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed, translate_text, remove_silence], outputs=[audio, audio_file, word_level_srt_file, srt_file, sentence_duration_file])
+        gr.Examples(examples=dummy_examples, inputs=[text, language_name, voice_name])
+    return demo
+
+def tutorial():
+    explanation = """
+    ## Language Code Explanation:
+    Example: `'af_bella'` 
+    - **'a'** stands for **American English**.
+    - **'f_'** stands for **Female** (If it were 'm_', it would mean Male).
+    - **'bella'** refers to the specific voice.
+    The first character in the voice code stands for the language:
+    - **"a"**: American English
+    - **"b"**: British English
+    - **"h"**: Hindi
+    - **"e"**: Spanish
+    - **"f"**: French
+    - **"i"**: Italian
+    - **"p"**: Brazilian Portuguese
+    - **"j"**: Japanese
+    - **"z"**: Mandarin Chinese
+    The second character stands for gender:
+    - **"f_"**: Female
+    - **"m_"**: Male
+    """
+    with gr.Blocks() as demo2:
+        gr.Markdown(explanation)
+    return demo2
+
+# === ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ===
+last_used_language = "a"
+pipeline = KPipeline(lang_code=last_used_language)
+temp_folder = create_audio_dir()
+
+# === ГЛАВНЫЙ ЗАПУСК ===
+if __name__ == "__main__":
+    demo1 = ui()
+    demo2 = tutorial()
+    demo = gr.TabbedInterface([demo1, demo2], ["Multilingual TTS", "VoicePack Explanation"], title="Kokoro TTS")
+    demo.queue().launch(share=True)
