@@ -522,29 +522,18 @@ def KOKORO_TTS_API(text, Language="American English",voice="af_bella", speed=1,t
 
 
 
+# ... (всё как было выше до функции ui)
+
 def ui():
     def toggle_autoplay(autoplay):
         return gr.Audio(interactive=False, label='Output Audio', autoplay=autoplay)
 
-    # Define examples in the format you mentioned
-    dummy_examples = [
-        ["Hey, y'all, let’s grab some coffee and catch up!", "American English", "af_bella"],
-        ["I'd like a large coffee, please.", "British English", "bf_isabella"],
-        ["नमस्ते, कैसे हो?", "Hindi", "hf_alpha"],
-        ["Hola, ¿cómo estás?", "Spanish", "ef_dora"],
-        ["Bonjour, comment ça va?", "French", "ff_siwis"],
-        ["Ciao, come stai?", "Italian", "if_sara"],
-        ["Olá, como você está?", "Brazilian Portuguese", "pf_dora"],
-        ["こんにちは、お元気ですか？", "Japanese", "jf_nezumi"],
-        ["你好，你怎么样?", "Mandarin Chinese", "zf_xiaoni"]
-    ]
-    
+    lang_list = ['American English', 'British English', 'Hindi', 'Spanish', 'French', 'Italian', 'Brazilian Portuguese', 'Japanese', 'Mandarin Chinese']
+    voice_names = get_voice_names("hexgrad/Kokoro-82M")
+
     with gr.Blocks() as demo:
         # gr.Markdown("<center><h1 style='font-size: 40px;'>KOKORO TTS</h1></center>")  # Larger title with CSS
         # gr.Markdown("[Install on Your Local System](https://github.com/NeuralFalconYT/kokoro_v1)")
-        lang_list = ['American English', 'British English', 'Hindi', 'Spanish', 'French', 'Italian', 'Brazilian Portuguese', 'Japanese', 'Mandarin Chinese']
-        voice_names = get_voice_names("hexgrad/Kokoro-82M")
-
         with gr.Row():
             with gr.Column():
                 text = gr.Textbox(label='📝 Enter Text', lines=3)
@@ -566,9 +555,6 @@ def ui():
             with gr.Column():
                 audio = gr.Audio(interactive=False, label='🔊 Output Audio', autoplay=True)
                 audio_file = gr.File(label='📥 Download Audio')
-                # word_level_srt_file = gr.File(label='Download Word-Level SRT')
-                # srt_file = gr.File(label='Download Sentence-Level SRT')
-                # sentence_duration_file = gr.File(label='Download Sentence Duration JSON')
                 with gr.Accordion('🎬 Autoplay, Subtitle, Timestamp', open=False):
                     autoplay = gr.Checkbox(value=True, label='▶️ Autoplay')
                     autoplay.change(toggle_autoplay, inputs=[autoplay], outputs=[audio])
@@ -579,63 +565,24 @@ def ui():
         text.submit(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed,translate_text, remove_silence], outputs=[audio, audio_file,word_level_srt_file,srt_file,sentence_duration_file])
         generate_btn.click(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed,translate_text, remove_silence], outputs=[audio, audio_file,word_level_srt_file,srt_file,sentence_duration_file])
 
-        # Add examples to the interface
-        gr.Examples(examples=dummy_examples, inputs=[text, language_name, voice_name])
+        # (!!!) УБРАНЫ gr.Examples и dummy_examples
 
     return demo
 
-def tutorial():
-    # Markdown explanation for language code
-    explanation = """
-    ## Language Code Explanation:
-    Example: `'af_bella'` 
-    - **'a'** stands for **American English**.
-    - **'f_'** stands for **Female** (If it were 'm_', it would mean Male).
-    - **'bella'** refers to the specific voice.
-
-    The first character in the voice code stands for the language:
-    - **"a"**: American English
-    - **"b"**: British English
-    - **"h"**: Hindi
-    - **"e"**: Spanish
-    - **"f"**: French
-    - **"i"**: Italian
-    - **"p"**: Brazilian Portuguese
-    - **"j"**: Japanese
-    - **"z"**: Mandarin Chinese
-
-    The second character stands for gender:
-    - **"f_"**: Female
-    - **"m_"**: Male
-    """
-    with gr.Blocks() as demo2:
-        # gr.Markdown("[Install on Your Local System](https://github.com/NeuralFalconYT/kokoro_v1)")
-        gr.Markdown(explanation)  # Display the explanation
-    return demo2
-
-
+# Функция tutorial и переменная demo2 полностью удалены
 
 import click
 @click.command()
 @click.option("--debug", is_flag=True, default=False, help="Enable debug mode.")
 @click.option("--share", is_flag=True, default=False, help="Enable sharing of the interface.")
 def main(debug, share):
-# def main(debug=True, share=True):
     demo1 = ui()
-    demo2 = tutorial()
-    demo = gr.TabbedInterface([demo1, demo2],["Multilingual TTS","VoicePack Explanation"],title="Kokoro TTS")#,theme='JohnSmith9982/small_and_pretty')
+    demo = gr.TabbedInterface([demo1], ["Multilingual TTS"], title="Kokoro TTS")
     demo.queue().launch(debug=debug, share=share)
-    # demo.queue().launch(debug=debug, share=share,server_port=9000)
-    #Run on local network
-    # laptop_ip="192.168.0.30"
-    # port=8080
-    # demo.queue().launch(debug=debug, share=share,server_name=laptop_ip,server_port=port)
-
-
 
 # Initialize default pipeline
 last_used_language = "a"
 pipeline = KPipeline(lang_code=last_used_language)
 temp_folder = create_audio_dir()
 if __name__ == "__main__":
-    main()    
+    main()
