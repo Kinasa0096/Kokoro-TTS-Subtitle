@@ -239,10 +239,7 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
         word_end = entry["end"]
         if word in remove_punctuation:
             continue
-        if word in string.punctuation:
-            if subtitle_words:
-                subtitle_words[-1] = (subtitle_words[-1][0] + word, subtitle_words[-1][1])
-            continue
+        if word in string.punctuation: subtitle_words[-1]=(subtitle_words[-1][0]+word,subtitle_words[-1][1]); word in '.!?' and (subtitles.append((start_time,subtitle_words[-1][1]," ".join(w[0] for w in subtitle_words))),subtitle_words.clear(),start_time:=None); continue
         if start_time is None:
             start_time = word_start
         if subtitle_words:
