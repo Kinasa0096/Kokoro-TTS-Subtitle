@@ -239,7 +239,21 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
         word_end = entry["end"]
         if word in remove_punctuation:
             continue
-        if word in string.punctuation: subtitle_words[-1]=(subtitle_words[-1][0]+word,subtitle_words[-1][1]); word in '.!?' and (subtitles.append((start_time,subtitle_words[-1][1]," ".join(w[0] for w in subtitle_words))),subtitle_words.clear(),start_time:=None); continue
+        if word in string.punctuation:
+            # если нет накопленных слов, просто пропускаем знаки
+            if not subtitle_words:
+                continue
+            # склеиваем пунктуацию с последним словом
+            subtitle_words[-1] = (subtitle_words[-1][0] + word, subtitle_words[-1][1])
+            # если это точка/восклицание/вопрос — закрываем сегмент
+            if word in '.!?':
+                end_time = subtitle_words[-1][1]
+                text = " ".join(w[0] for w in subtitle_words)
+                subtitles.append((start_time, end_time, text))
+                subtitle_words = []
+                start_time = None
+            continue
+
         if start_time is None:
             start_time = word_start
         if subtitle_words:
