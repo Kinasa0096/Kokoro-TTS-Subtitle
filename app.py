@@ -250,7 +250,7 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
             pause_duration = word_start - last_word_end
         else:
             pause_duration = 0
-        if (word.endswith(('.', '!', '?')) and len(subtitle_words) >= 5) or len(subtitle_words) >= max_words or pause_duration > min_pause:
+        if word.endswith(('.', '!', '?')) or len(subtitle_words) >= max_words or pause_duration > min_pause:
             end_time = subtitle_words[-1][1]
             subtitle_text = " ".join(w[0] for w in subtitle_words)
             subtitles.append((start_time, end_time, subtitle_text))
