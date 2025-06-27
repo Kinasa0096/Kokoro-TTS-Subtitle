@@ -1,17 +1,17 @@
-# app.py — ПОЛНОСТЬЮ ГОТОВЫЙ ФАЙЛ, исправляет длинные паузы между чанками
-
+# Initalize a pipeline
 from kokoro import KPipeline
 import os
 from huggingface_hub import list_repo_files
 import uuid
 import re 
 import gradio as gr
+
 from deep_translator import GoogleTranslator
 
 def bulk_translate(text, target_language, chunk_size=500):
     language_map_local = {
-        "American English": "en",
-        "British English": "en",
+        "American English": "en",  
+        "British English": "en",  
         "Hindi": "hi",
         "Spanish": "es",
         "French": "fr",
@@ -53,13 +53,13 @@ def update_pipeline(Language):
     new_lang = language_map.get(Language, "a")
     if new_lang != last_used_language:
         pipeline = KPipeline(lang_code=new_lang)
-        last_used_language = new_lang
+        last_used_language = new_lang 
         try:
             pipeline = KPipeline(lang_code=new_lang)
             last_used_language = new_lang
         except Exception as e:
-            gr.Warning(f"Make sure the input text is in {Language}", duration=10)
-            gr.Warning(f"Fallback to English Language", duration=5)
+            gr.Warning(f"Make sure the input text is in {Language}",duration=10)
+            gr.Warning(f"Fallback to English Language",duration=5)
             pipeline = KPipeline(lang_code="a")
             last_used_language = "a"
 
@@ -97,8 +97,8 @@ def clean_text(text):
         r'[\U0001FA00-\U0001FA6F]|'
         r'[\U0001FA70-\U0001FAFF]|'
         r'[\U00002702-\U000027B0]|'
-        r'[\U0001F1E0-\U0001F1FF]',
-        flags=re.UNICODE)
+        r'[\U0001F1E0-\U0001F1FF]'
+        r'', flags=re.UNICODE)
     text = emoji_pattern.sub(r'', text)
     text = re.sub(r'\s+', ' ', text).strip()
     return text
@@ -116,78 +116,60 @@ def tts_file_name(text, language):
 
 import numpy as np
 import wave
-from pydub import AudioSegment
-from pydub.silence import split_on_silence
+from pydub import AudioSegment, silence
 
-def trim_trailing_silence(audio_np, sample_rate=24000, threshold=0.001, min_silence_sec=0.05):
-    if audio_np.ndim > 1:
-        audio_np = audio_np.flatten()
-    window_size = int(sample_rate * min_silence_sec)
-    if window_size == 0: window_size = 1
-    for i in range(len(audio_np) - 1, window_size, -1):
-        if np.max(np.abs(audio_np[i-window_size:i])) > threshold:
-            return audio_np[:i]
-    return audio_np
+def strip_silence(audio: AudioSegment, silence_thresh=-45, chunk_size=10):
+    not_silence = silence.detect_nonsilent(audio, min_silence_len=chunk_size, silence_thresh=silence_thresh)
+    if not not_silence:
+        return audio
+    start_trim = not_silence[0][0]
+    end_trim = not_silence[-1][1]
+    return audio[start_trim:end_trim]
 
-def generate_and_save_audio(
-    text,
-    Language="American English",
-    voice="af_bella",
-    speed=1,
-    remove_silence=False,
-    keep_silence_up_to=0.01
-):
+def generate_and_save_audio(text, Language="American English", voice="af_bella", speed=1, remove_silence=False, keep_silence_up_to=0.05):
     text = clean_text(text)
     update_pipeline(Language)
     generator = pipeline(text, voice=voice, speed=speed, split_pattern=r'\n+')
-    save_path = tts_file_name(text, Language)
-    timestamps = {}
-    with wave.open(save_path, 'wb') as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(24000)
-        for i, result in enumerate(generator):
-            gs = result.graphemes
-            ps = result.phonemes
-            audio = result.audio
-            tokens = result.tokens
-            timestamps[i] = {"text": gs, "words": []}
-            if Language in ["American English", "British English"]:
-                for t in tokens:
-                    timestamps[i]["words"].append({"word": t.text, "start": t.start_ts, "end": t.end_ts})
-            audio_np = audio.numpy()
-            audio_np = trim_trailing_silence(audio_np, sample_rate=24000, threshold=0.001, min_silence_sec=0.05)
-            audio_int16 = (audio_np * 32767).astype(np.int16)
-            audio_bytes = audio_int16.tobytes()
-            duration_sec = len(audio_np) / 24000
-            timestamps[i]["duration"] = duration_sec
-            wav_file.writeframes(audio_bytes)
-    return save_path, timestamps
+    temp_audio_segments = []
+    temp_word_timestamps = []
+    global_offset = 0.0
 
-def adjust_timestamps(timestamp_dict):
-    adjusted_timestamps = []
-    last_global_end = 0
-    for segment_id in sorted(timestamp_dict.keys()):
-        segment = timestamp_dict[segment_id]
-        words = segment["words"]
-        chunk_duration = segment["duration"]
-        last_word_end_in_chunk = (
-            max(w["end"] for w in words if w["end"] not in [None, 0])
-            if words else 0
-        )
-        silence_gap = chunk_duration - last_word_end_in_chunk
-        if silence_gap < 0:
-            silence_gap = 0
-        for word in words:
-            start = word["start"] or 0
-            end = word["end"] or start
-            adjusted_timestamps.append({
-                "word": word["word"],
-                "start": round(last_global_end + start, 3),
-                "end": round(last_global_end + end, 3)
+    for i, result in enumerate(generator):
+        audio_np = result.audio.numpy()
+        audio_int16 = (audio_np * 32767).astype(np.int16)
+        audio_bytes = audio_int16.tobytes()
+        temp_file = f"temp_chunk_{uuid.uuid4().hex}.wav"
+        with wave.open(temp_file, 'wb') as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(24000)
+            wav_file.writeframes(audio_bytes)
+        chunk_audio = AudioSegment.from_wav(temp_file)
+        trimmed_audio = strip_silence(chunk_audio, silence_thresh=-45)
+        not_silence = silence.detect_nonsilent(chunk_audio, min_silence_len=10, silence_thresh=-45)
+        left_trim = not_silence[0][0] / 1000.0 if not_silence else 0
+        temp_audio_segments.append(trimmed_audio)
+        tokens = result.tokens
+        for t in tokens:
+            start = (t.start_ts or 0) - left_trim + global_offset
+            end = (t.end_ts or 0) - left_trim + global_offset
+            temp_word_timestamps.append({
+                "word": t.text,
+                "start": max(0.0, round(start, 3)),
+                "end": max(0.0, round(end, 3)),
             })
-        last_global_end += chunk_duration
-    return adjusted_timestamps
+        global_offset += len(trimmed_audio) / 1000.0
+        os.remove(temp_file)
+
+    final_audio = temp_audio_segments[0]
+    for seg in temp_audio_segments[1:]:
+        final_audio += seg
+    save_path = tts_file_name(text, Language)
+    final_audio.export(save_path, format="wav")
+    return save_path, temp_word_timestamps
+
+def adjust_timestamps(word_timestamps):
+    return word_timestamps
 
 import string
 
@@ -232,7 +214,7 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
     subtitles = []
     subtitle_words = []
     start_time = None
-    remove_punctuation = ['"', "—"]
+    remove_punctuation = ['"',"—"]
     for i, entry in enumerate(word_level_timestamps):
         word = entry["word"]
         word_start = entry["start"]
@@ -274,6 +256,7 @@ def write_sentence_srt(word_level_timestamps, output_file="subtitles.srt", max_w
             f.write(f"{i}\n{format_srt_time(start)} --> {format_srt_time(end)}\n{text}\n\n")
 
 import json
+import re
 
 def fix_punctuation(text):
     text = re.sub(r'\s([.,?!])', r'\1', text)
@@ -347,45 +330,55 @@ def make_json(word_timestamps, json_file_name):
         json.dump(data, json_file, indent=4)
     return json_file_name
 
-import shutil
-def save_current_data():
-    if os.path.exists("./last"):
-        shutil.rmtree("./last")
-    os.makedirs("./last", exist_ok=True)
-
 def modify_filename(save_path: str, prefix: str = ""):
     directory, filename = os.path.split(save_path)
     name, ext = os.path.splitext(filename)
     new_filename = f"{prefix}{name}{ext}"
     return os.path.join(directory, new_filename)
+import shutil
+def save_current_data():
+    if os.path.exists("./last"):
+        shutil.rmtree("./last")
+    os.makedirs("./last",exist_ok=True)
 
-def KOKORO_TTS_API(text, Language="American English", voice="af_bella", speed=1, translate_text=False, remove_silence=False, keep_silence_up_to=0.05):
-    if translate_text:
+def KOKORO_TTS_API(text, Language="American English",voice="af_bella", speed=1,translate_text=False,remove_silence=False,keep_silence_up_to=0.05):
+    if translate_text:    
         text = bulk_translate(text, Language, chunk_size=500)
-    save_path, timestamps = generate_and_save_audio(text=text, Language=Language, voice=voice, speed=speed, remove_silence=remove_silence, keep_silence_up_to=keep_silence_up_to)
-    if remove_silence == False:
-        if Language in ["American English", "British English"]:
-            word_level_timestamps = adjust_timestamps(timestamps)
-            word_level_srt = modify_filename(save_path.replace(".wav", ".srt"), prefix="word_level_")
-            normal_srt = modify_filename(save_path.replace(".wav", ".srt"), prefix="sentence_")
-            json_file = modify_filename(save_path.replace(".wav", ".json"), prefix="duration_")
-            write_word_srt(word_level_timestamps, output_file=word_level_srt, skip_punctuation=True)
-            write_sentence_srt(word_level_timestamps, output_file=normal_srt, min_pause=0.01)
-            make_json(word_level_timestamps, json_file)
-            save_current_data()
-            shutil.copy(save_path, "./last/")
-            shutil.copy(word_level_srt, "./last/")
-            shutil.copy(normal_srt, "./last/")
-            shutil.copy(json_file, "./last/")
-            return save_path, save_path, word_level_srt, normal_srt, json_file
-    return save_path, save_path, None, None, None
+    save_path, word_level_timestamps = generate_and_save_audio(
+        text=text, Language=Language, voice=voice, speed=speed, remove_silence=remove_silence, keep_silence_up_to=keep_silence_up_to
+    )
+    if Language in ["American English", "British English"]:
+        word_level_srt = modify_filename(save_path.replace(".wav", ".srt"), prefix="word_level_")
+        normal_srt = modify_filename(save_path.replace(".wav", ".srt"), prefix="sentence_")
+        json_file = modify_filename(save_path.replace(".wav", ".json"), prefix="duration_")
+        write_word_srt(word_level_timestamps, output_file=word_level_srt, skip_punctuation=True)
+        write_sentence_srt(word_level_timestamps, output_file=normal_srt, min_pause=0.01)
+        make_json(word_level_timestamps, json_file)
+        save_current_data()
+        shutil.copy(save_path, "./last/")
+        shutil.copy(word_level_srt, "./last/")
+        shutil.copy(normal_srt, "./last/")
+        shutil.copy(json_file, "./last/")
+        return save_path, save_path, word_level_srt, normal_srt, json_file
+    return save_path, save_path, None, None, None    
 
 def ui():
     def toggle_autoplay(autoplay):
         return gr.Audio(interactive=False, label='Output Audio', autoplay=autoplay)
-    lang_list = ['American English', 'British English', 'Hindi', 'Spanish', 'French', 'Italian', 'Brazilian Portuguese', 'Japanese', 'Mandarin Chinese']
-    voice_names = get_voice_names("hexgrad/Kokoro-82M")
+    dummy_examples = [
+        ["Hey, y'all, let’s grab some coffee and catch up!", "American English", "af_bella"],
+        ["I'd like a large coffee, please.", "British English", "bf_isabella"],
+        ["नमस्ते, कैसे हो?", "Hindi", "hf_alpha"],
+        ["Hola, ¿cómo estás?", "Spanish", "ef_dora"],
+        ["Bonjour, comment ça va?", "French", "ff_siwis"],
+        ["Ciao, come stai?", "Italian", "if_sara"],
+        ["Olá, como você está?", "Brazilian Portuguese", "pf_dora"],
+        ["こんにちは、お元気ですか？", "Japanese", "jf_nezumi"],
+        ["你好，你怎么样?", "Mandarin Chinese", "zf_xiaoni"]
+    ]
     with gr.Blocks() as demo:
+        lang_list = ['American English', 'British English', 'Hindi', 'Spanish', 'French', 'Italian', 'Brazilian Portuguese', 'Japanese', 'Mandarin Chinese']
+        voice_names = get_voice_names("hexgrad/Kokoro-82M")
         with gr.Row():
             with gr.Column():
                 text = gr.Textbox(label='📝 Enter Text', lines=3)
@@ -405,24 +398,4 @@ def ui():
                 with gr.Accordion('🎬 Autoplay, Subtitle, Timestamp', open=False):
                     autoplay = gr.Checkbox(value=True, label='▶️ Autoplay')
                     autoplay.change(toggle_autoplay, inputs=[autoplay], outputs=[audio])
-                    word_level_srt_file = gr.File(label='📝 Download Word-Level SRT')
-                    srt_file = gr.File(label='📜 Download Sentence-Level SRT')
-                    sentence_duration_file = gr.File(label='⏳ Download Sentence Timestamp JSON')
-        text.submit(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed, translate_text, remove_silence], outputs=[audio, audio_file, word_level_srt_file, srt_file, sentence_duration_file])
-        generate_btn.click(KOKORO_TTS_API, inputs=[text, language_name, voice_name, speed, translate_text, remove_silence], outputs=[audio, audio_file, word_level_srt_file, srt_file, sentence_duration_file])
-    return demo
-
-import click
-@click.command()
-@click.option("--debug", is_flag=True, default=False, help="Enable debug mode.")
-@click.option("--share", is_flag=True, default=False, help="Enable sharing of the interface.")
-def main(debug, share):
-    demo1 = ui()
-    demo = gr.TabbedInterface([demo1], ["Multilingual TTS"], title="Kokoro TTS")
-    demo.queue().launch(debug=debug, share=share)
-
-last_used_language = "a"
-pipeline = KPipeline(lang_code=last_used_language)
-temp_folder = create_audio_dir()
-if __name__ == "__main__":
-    main()
+                    word_level
