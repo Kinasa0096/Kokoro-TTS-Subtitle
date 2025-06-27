@@ -370,7 +370,7 @@ def KOKORO_TTS_API(text, Language="American English", voice="af_bella", speed=1,
             normal_srt = modify_filename(save_path.replace(".wav", ".srt"), prefix="sentence_")
             json_file = modify_filename(save_path.replace(".wav", ".json"), prefix="duration_")
             write_word_srt(word_level_timestamps, output_file=word_level_srt, skip_punctuation=True)
-            write_sentence_srt(word_level_timestamps, output_file=normal_srt, min_pause=0.01)
+            write_sentence_srt(word_level_timestamps, output_file=normal_srt, min_pause=1.0, max_words=9999)
             make_json(word_level_timestamps, json_file)
             save_current_data()
             shutil.copy(save_path, "./last/")
